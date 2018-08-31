@@ -6,6 +6,7 @@
 #include <unordered_map>
 
 #include <SFML/Graphics.hpp>
+#include <SFML/Audio.hpp>
 
 typedef unsigned short WORD;
 typedef unsigned char BYTE;
@@ -1003,6 +1004,18 @@ int main(int argc, char** argv)
 	sf::Clock timer;
 	timer.restart();
 
+	sf::SoundBuffer buffer;
+	if (!buffer.loadFromFile("buzzer.wav"))
+	{
+		printf("Could not load buzzer sound");
+		getchar();
+		return -1;
+	}
+
+	sf::Sound buzzer;
+	buzzer.setBuffer(buffer);
+	buzzer.setVolume(1.5f);
+
 	chip8.Initialize();
 	chip8.LoadGame("pong2.c8");
 
@@ -1013,7 +1026,10 @@ int main(int argc, char** argv)
 		if (timer.getElapsedTime().asMilliseconds() >= 1000 / 60)
 		{
 			if (chip8.delay_timer != 0) chip8.delay_timer--;
-			if (chip8.sound_timer != 0) chip8.sound_timer--;
+			if (chip8.sound_timer != 0) {
+				buzzer.play();
+				chip8.sound_timer--;
+			}
 			timer.restart();
 		}
 
