@@ -1,12 +1,86 @@
+////////////////////////////////////////////////////////////////
+// A CHIP-8 INTERPRETER, CONTAINED IN ONE FILE
+//
+// INTERPRETATION LOGIC DONE BY ME
+//
+// GRAPHICS HANDLING CODED BY JAVIDX9
+// https://www.youtube.com/channel/UC-yuWVUplUJZvieEligKBkA
+//
+// I used the snippets I needed from his olcGameEngine.hpp
+// I removed everything not needed to draw pixels to a console
+//
+/////////////////////////////////////////////////////////////////
+
+
+
 #include <array>
 #include <fstream>
 #include <iostream>
 #include <random>
 #include <chrono>
 #include <unordered_map>
+#include <string>
 
-#include <SFML/Graphics.hpp>
-#include <SFML/Audio.hpp>
+#pragma comment(lib, "winmm.lib")
+
+#ifndef UNICODE
+#error Please enable UNICODE for your compiler! VS: Project Properties -> General -> \
+Character Set -> Use Unicode. Thanks! - Javidx9
+#endif
+
+#include <windows.h>
+
+#include <atomic>
+#include <condition_variable>
+
+#define SUPPRESS_PROC_INFO
+
+
+enum COLOUR
+{
+	FG_BLACK = 0x0000,
+	FG_DARK_BLUE = 0x0001,
+	FG_DARK_GREEN = 0x0002,
+	FG_DARK_CYAN = 0x0003,
+	FG_DARK_RED = 0x0004,
+	FG_DARK_MAGENTA = 0x0005,
+	FG_DARK_YELLOW = 0x0006,
+	FG_GREY = 0x0007, // Thanks MS :-/
+	FG_DARK_GREY = 0x0008,
+	FG_BLUE = 0x0009,
+	FG_GREEN = 0x000A,
+	FG_CYAN = 0x000B,
+	FG_RED = 0x000C,
+	FG_MAGENTA = 0x000D,
+	FG_YELLOW = 0x000E,
+	FG_WHITE = 0x000F,
+	BG_BLACK = 0x0000,
+	BG_DARK_BLUE = 0x0010,
+	BG_DARK_GREEN = 0x0020,
+	BG_DARK_CYAN = 0x0030,
+	BG_DARK_RED = 0x0040,
+	BG_DARK_MAGENTA = 0x0050,
+	BG_DARK_YELLOW = 0x0060,
+	BG_GREY = 0x0070,
+	BG_DARK_GREY = 0x0080,
+	BG_BLUE = 0x0090,
+	BG_GREEN = 0x00A0,
+	BG_CYAN = 0x00B0,
+	BG_RED = 0x00C0,
+	BG_MAGENTA = 0x00D0,
+	BG_YELLOW = 0x00E0,
+	BG_WHITE = 0x00F0,
+};
+
+enum PIXEL_TYPE
+{
+	PIXEL_SOLID = 0x2588,
+	PIXEL_THREEQUARTERS = 0x2593,
+	PIXEL_HALF = 0x2592,
+	PIXEL_QUARTER = 0x2591,
+};
+
+
 
 typedef unsigned short WORD;
 typedef unsigned char BYTE;
@@ -16,12 +90,7 @@ const constexpr unsigned HEIGHT = 32;
 const constexpr unsigned RAM = 4096; // 4kB RAM
 const constexpr unsigned FONTSET_SIZE = 16 * 5;
 const constexpr unsigned SCALE = 20;
-
-sf::RenderWindow window(sf::VideoMode(WIDTH * SCALE, HEIGHT * SCALE), "CHIP-8 Interpreter, x86", sf::Style::Close);
-sf::Event event;
-sf::Uint8* pixels = new sf::Uint8[WIDTH * HEIGHT * 4]{};
-
-
+const constexpr char*	 FILENAME = "invaders.c8";
 
 BYTE fontset[FONTSET_SIZE] =
 {
@@ -43,12 +112,12 @@ BYTE fontset[FONTSET_SIZE] =
 	0xF0, 0x80, 0xF0, 0x80, 0x80		// F
 };
 
-std::unordered_map<BYTE, sf::Keyboard::Key> keymap =
+std::unordered_map<BYTE, int> keymap =
 {
-	{ 0x1, sf::Keyboard::Num1	},{ 0x2, sf::Keyboard::Num2 },{ 0x3, sf::Keyboard::Num3 },{ 0xC, sf::Keyboard::Num4 },
-	{ 0x4, sf::Keyboard::Q		},{ 0x5, sf::Keyboard::W	},{ 0x6, sf::Keyboard::E	},{ 0xD, sf::Keyboard::R	},
-	{ 0x7, sf::Keyboard::A		},{ 0x8, sf::Keyboard::S	},{ 0x9, sf::Keyboard::D	},{ 0xE, sf::Keyboard::F	},
-	{ 0xA, sf::Keyboard::Y		},{ 0x0, sf::Keyboard::X	},{ 0xB, sf::Keyboard::C	},{ 0xF, sf::Keyboard::V	}
+	{ 0x1, '1'		},{ 0x2, '2'	},{ 0x3, '3'	},{ 0xC, '4'	},
+	{ 0x4, 'Q'		},{ 0x5, 'W'	},{ 0x6, 'E'	},{ 0xD, 'R'	},
+	{ 0x7, 'A'		},{ 0x8, 'S'	},{ 0x9, 'D'	},{ 0xE, 'F'	},
+	{ 0xA, 'Y'		},{ 0x0, 'X'	},{ 0xB, 'C'	},{ 0xF, 'V'	}
 };
 
 class Chip8
@@ -118,7 +187,10 @@ public:
 	{
 		// Fetch opcode
 		opcode = (memory[pc] << 8) | memory[pc + 1];
+
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << std::uppercase << std::hex << opcode << ": ";
+#endif
 
 		BYTE x = (opcode & 0x0F00) >> 8;
 		BYTE y = (opcode & 0x00F0) >> 4;
@@ -168,6 +240,10 @@ public:
 
 		case 0x4000:	// 4XKK: If VX != KK, skip next instruction
 			SNE(x, kk);
+			break;
+
+		case 0x5000:
+			SE_XY(x, y);
 			break;
 
 
@@ -377,7 +453,9 @@ private:	// Opcodes
 		std::fill(std::begin(gfx), std::end(gfx), 0);
 		pc += 0x02;
 
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "Screen cleared" << std::endl;
+#endif
 	}
 
 
@@ -388,7 +466,10 @@ private:	// Opcodes
 	void RET()
 	{
 		pc = stack[--sp] + 0x02;
+
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "Returned from subroutine" << std::endl;
+#endif
 	}
 
 	///////////////////0x1NNN///////////////////
@@ -400,7 +481,10 @@ private:	// Opcodes
 	void JP(WORD address)
 	{
 		pc = address;
+
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "Jumped to 0x" << address << std::endl;
+#endif
 	}
 
 	///////////////////0x2NNN///////////////////
@@ -413,7 +497,9 @@ private:	// Opcodes
 		stack[sp++] = pc;
 		pc = address;
 
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "Called subroutine at 0x" << address << std::endl;
+#endif
 	}
 
 
@@ -429,12 +515,18 @@ private:	// Opcodes
 		if (V[regX] == kk) 
 		{
 			pc += 0x04;
+
+#ifndef SUPPRESS_PROC_INFO
 			std::cout << "Skipped instruction because V" << (WORD)regX << " == " << (WORD)kk << std::endl;
+#endif
 		}
 		else 
 		{
 			pc += 0x02;
+
+#ifndef SUPPRESS_PROC_INFO
 			std::cout << "Didn't skip instruction because V" << (WORD)regX << " != " << (WORD)kk << std::endl;
+#endif
 		}
 
 	}
@@ -452,12 +544,47 @@ private:	// Opcodes
 		if (V[regX] != kk)
 		{
 			pc += 0x04;
+
+#ifndef SUPPRESS_PROC_INFO
 			std::cout << "Skipped instruction because V" << (WORD)regX << " != " << (WORD)kk << std::endl;
+#endif
 		}
 		else
 		{
 			pc += 0x02;
+
+#ifndef SUPPRESS_PROC_INFO
 			std::cout << "Didn't skip instruction because V" << (WORD)regX << " == " << (WORD)kk << std::endl;
+#endif
+		}
+
+	}
+
+
+	///////////////////0x5XY0///////////////////
+	/// \brief Skip next instr if VX == VY
+	///
+	/// \param regX X
+	/// \param regY Y
+	///
+	////////////////////////////////////////////
+	void SE_XY(BYTE regX, BYTE regY)
+	{
+		if (V[regX] == V[regY])
+		{
+			pc += 0x04;
+
+#ifndef SUPPRESS_PROC_INFO
+			std::cout << "Skipped instruction because V" << (WORD)regX << " != V" << (WORD)regY << std::endl;
+#endif
+		}
+		else
+		{
+			pc += 0x02;
+
+#ifndef SUPPRESS_PROC_INFO
+			std::cout << "Didn't skip instruction because V" << (WORD)regX << " == V" << (WORD)regY << std::endl;
+#endif
 		}
 
 	}
@@ -474,7 +601,9 @@ private:	// Opcodes
 		V[regX] = byte;
 		pc += 0x02;
 
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "Set V" << (WORD)regX << " to 0x" << (WORD)byte << std::endl;
+#endif
 	}
 
 
@@ -489,7 +618,9 @@ private:	// Opcodes
 		V[regX] += byte;
 		pc += 0x02;
 
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "Added 0x" << (WORD)byte << " to V" << (WORD)regX << std::endl;
+#endif
 	}
 
 
@@ -505,7 +636,9 @@ private:	// Opcodes
 
 		pc += 0x02;
 
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "V" << (WORD)regY << "(0x" << (WORD) V[regY] << ") => V" << (WORD)regX << std::endl;
+#endif
 	}
 
 
@@ -521,7 +654,9 @@ private:	// Opcodes
 
 		pc += 0x02;
 
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "V" << (WORD)regX << " |= V" << (WORD)regY << "(0x" << (WORD)V[regY] << ") => " << (WORD)V[regX] << std::endl;
+#endif
 	}
 
 
@@ -537,7 +672,9 @@ private:	// Opcodes
 
 		pc += 0x02;
 
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "V" << (WORD)regX << " &= V" << (WORD)regY << "(0x" << (WORD)V[regY] << ") => " << (WORD)V[regX] << std::endl;
+#endif
 	}
 
 
@@ -553,7 +690,9 @@ private:	// Opcodes
 
 		pc += 0x02;
 
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "V" << (WORD)regX << " ^= V" << (WORD)regY << "(0x" << (WORD)V[regY] << ") => " << (WORD)V[regX] << std::endl;
+#endif
 	}
 
 
@@ -565,7 +704,7 @@ private:	// Opcodes
 	////////////////////////////////////////////
 	void ADD_XY(BYTE regX, BYTE regY)
 	{
-		if (V[regY] > 0xF - V[regX])
+		if (V[regY] > 0xFF - V[regX])
 			V[0xF] = 1;
 		else
 			V[0xF] = 0;
@@ -573,7 +712,9 @@ private:	// Opcodes
 		V[regX] = (V[regX] + V[regY]) & 0xFF;
 		pc += 0x02;
 
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "V" << (WORD)regX << " += V" << (WORD)regY << "(0x" << (WORD)V[regY] << ") => " << (WORD)V[regX] << ", Carry = " << (WORD)V[0xF] << std::endl;
+#endif
 	}
 
 
@@ -593,7 +734,9 @@ private:	// Opcodes
 		V[regX] = (V[regX] - V[regY]) & 0xFF;
 		pc += 0x02;
 
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "V" << (WORD)regX << " -= V" << (WORD)regY << "(0x" << (WORD)V[regY] << ") => " << (WORD)V[regX] << ", Carry = " << (WORD)V[0xF] << std::endl;
+#endif
 	}
 
 
@@ -609,7 +752,10 @@ private:	// Opcodes
 		V[regX] >>= 1;
 
 		pc += 0x02;
+
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "Shifted V" << (WORD)regX << " right once. VF = " << (WORD)V[0xF] << std::endl;
+#endif
 	}
 
 
@@ -629,7 +775,9 @@ private:	// Opcodes
 		V[regX] = (V[regY] - V[regX]) & 0xFF;
 		pc += 0x02;
 
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "V" << (WORD)regX << " = V" << (WORD)regY << "(0x" << (WORD)V[regY] << ") - V" << (WORD)regX << " => " << (WORD)V[regX] << ", Carry = " << (WORD)V[0xF] << std::endl;
+#endif
 	}
 
 
@@ -645,7 +793,10 @@ private:	// Opcodes
 		V[regX] <<= 1;
 
 		pc += 0x02;
+
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "Shifted V" << (WORD)regX << " left once. VF = " << (WORD)V[0xF] << std::endl;
+#endif
 	}
 
 
@@ -661,12 +812,18 @@ private:	// Opcodes
 		if (V[regX] != V[regY])
 		{
 			pc += 0x04;
+
+#ifndef SUPPRESS_PROC_INFO
 			std::cout << "Skipped instruction because V" << (WORD)regX << " != V" << (WORD)regY << std::endl;
+#endif
 		}
 		else
 		{
 			pc += 0x02;
+
+#ifndef SUPPRESS_PROC_INFO
 			std::cout << "Didn't skip instruction because V" << (WORD)regX << " == V" << (WORD)regY << std::endl;
+#endif
 		}
 
 	}
@@ -682,7 +839,9 @@ private:	// Opcodes
 		I = address;
 		pc += 0x02;
 
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "Set I to 0x" << address << std::endl;
+#endif
 	}
 
 
@@ -695,7 +854,9 @@ private:	// Opcodes
 	{
 		pc = address + V[0x0];
 
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "Jumped to adress " << (WORD)pc << std::endl;
+#endif
 	}
 
 	
@@ -716,7 +877,9 @@ private:	// Opcodes
 
 		pc += 0x02;
 
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "(Random) Set V" << (WORD)regX << " to 0x" << (WORD)rnd << std::endl;
+#endif
 	}
 
 
@@ -759,7 +922,9 @@ private:	// Opcodes
 		pc += 0x02;
 		drawFlag = true;
 
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "Drew Sprite at position (V" << (WORD)regX << ", V" << (WORD)regY << ")[" << std::dec << (WORD)V[regX] << ", " << (WORD)V[regY] << "]" << std::endl;
+#endif
 	}
 
 
@@ -771,15 +936,21 @@ private:	// Opcodes
 	////////////////////////////////////////////
 	void SKP(BYTE regX)
 	{
-		if (!sf::Keyboard::isKeyPressed(keymap.find(V[regX])->second))
+		if (GetKeyState(keymap.find(V[regX])->second) & 0x8000)
 		{
-			pc += 0x02;
-			std::cout << "Didn't skip instruction because key " << (WORD)V[regX] << " was not pressed" << std::endl;
+			pc += 0x04;
+
+#ifndef SUPPRESS_PROC_INFO
+			std::cout << "Skipped instruction because key " << (WORD)V[regX] << " was pressed" << std::endl;
+#endif	
 		}
 		else
 		{
-			pc += 0x04;
-			std::cout << "Skipped instruction because key " << (WORD)V[regX] << " was pressed" << std::endl;
+			pc += 0x02;
+
+#ifndef SUPPRESS_PROC_INFO
+			std::cout << "Didn't skip instruction because key " << (WORD)V[regX] << " was not pressed" << std::endl;
+#endif
 		}
 	}
 
@@ -792,15 +963,21 @@ private:	// Opcodes
 	////////////////////////////////////////////
 	void SKNP(BYTE regX)
 	{
-		if (sf::Keyboard::isKeyPressed(keymap.find(V[regX])->second))
+		if (GetKeyState(keymap.find(V[regX])->second) & 0x8000)
 		{
 			pc += 0x02;
+
+#ifndef SUPPRESS_PROC_INFO
 			std::cout << "Didn't skip instruction because key " << (WORD)V[regX] << " was pressed" << std::endl;
+#endif
 		} 
 		else
 		{
 			pc += 0x04;
+
+#ifndef SUPPRESS_PROC_INFO
 			std::cout << "Skipped instruction because key " << (WORD)V[regX] << " was not pressed" << std::endl;
+#endif
 		}
 	}
 
@@ -816,7 +993,10 @@ private:	// Opcodes
 		V[regX] = delay_timer;
 
 		pc += 0x02;
+
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "Set V" << (WORD)regX << " to delay_timer(" << (WORD)delay_timer << ")" << std::endl;
+#endif
 	}
 
 
@@ -828,15 +1008,20 @@ private:	// Opcodes
 	////////////////////////////////////////////
 	void LD_K(BYTE regX)
 	{
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "Waiting for Key press..." << std::endl;
+#endif
 		for (BYTE key = 0x0; key < 0xF; key++)
 		{
-			if (sf::Keyboard::isKeyPressed(keymap.find(key)->second))
+			if (GetKeyState(keymap.find(key)->second) & 0x8000)
 			{
 				V[regX] = key;
 				pc += 0x02;
 
+#ifndef SUPPRESS_PROC_INFO
 				std::cout << "Key pressed: 0x" << (WORD)key << ". Saved to V" << (WORD)regX << std::endl;
+#endif
+
 				break;
 			}
 		}
@@ -854,7 +1039,10 @@ private:	// Opcodes
 		delay_timer = V[regX];
 
 		pc += 0x02;
+
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "Set delay timer to " << (WORD)V[regX] << std::endl;
+#endif
 	}
 
 
@@ -869,7 +1057,10 @@ private:	// Opcodes
 		sound_timer = V[regX];
 
 		pc += 0x02;
+
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "Set sound timer to " << (WORD)V[regX] << std::endl;
+#endif
 	}
 
 
@@ -884,7 +1075,9 @@ private:	// Opcodes
 		I += V[regX];
 		pc += 0x02;
 
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "Added V" << (WORD)regX << "(" << (WORD)V[regX] << ") to I. I = " << (WORD)I << std::endl;
+#endif
 	}
 
 	///////////////////0xFX29///////////////////
@@ -898,7 +1091,9 @@ private:	// Opcodes
 		I = 0x0000 + (V[regX] * 5);
 		pc += 0x02;
 
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "Stored font \"" << (WORD)V[regX] << "\" at I" << std::endl;
+#endif
 	}
 
 
@@ -923,7 +1118,10 @@ private:	// Opcodes
 		memory[I + 2] = value;
 
 		pc += 0x02;
+
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "Storing Binary Coded Decimal V" << (WORD)regX << " as {" << std::dec << (WORD)hundreds << ", " << (WORD)tens << ", " << (WORD)value << "}" << std::endl;
+#endif
 	}
 
 
@@ -941,7 +1139,10 @@ private:	// Opcodes
 		}
 
 		pc += 0x02;
+
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "Filled memory starting at 0x" << (WORD)I << " with the values of V0 to V" << (WORD)regX << std::endl;
+#endif
 	}
 
 
@@ -959,96 +1160,351 @@ private:	// Opcodes
 		}
 
 		pc += 0x02;
+
+#ifndef SUPPRESS_PROC_INFO
 		std::cout << "Filled V0 through V" << (WORD)regX << " with memory values starting at 0x" << I << std::endl;
+#endif
 	}
 } chip8;
 
-//////////////////////////////////////////////
-/// \brief Draws the pixel array to the screen
-///
-/// \param window The render target
-/// \param pixels The pixel array
-///
-//////////////////////////////////////////////
-void drawGraphics()
+
+
+
+class olcConsoleGameEngine
 {
-	static sf::Texture texture;
-	static sf::Sprite sprite;
-
-	BYTE* gfx = chip8.getDisplay();
-
-	for (int i = 0; i < WIDTH * HEIGHT; i++)
+public:
+	olcConsoleGameEngine()
 	{
-		//printf("%i: %i\n", i, gfx[i]);
-		pixels[4 * i + 0] = 255 * gfx[i];
-		pixels[4 * i + 1] = 255 * gfx[i];
-		pixels[4 * i + 2] = 255 * gfx[i];
-		pixels[4 * i + 3] = 255 * gfx[i];
+		m_nScreenWidth = 80;
+		m_nScreenHeight = 30;
+
+		m_hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+		m_hConsoleIn = GetStdHandle(STD_INPUT_HANDLE);
+
+		m_sAppName = L"Default";
 	}
 
-	texture.create(WIDTH, HEIGHT);
-	texture.update(pixels);
-
-	sprite.setTexture(texture);
-	sprite.setScale(sf::Vector2f(SCALE, SCALE));
-
-	window.clear(sf::Color::Black);
-	window.draw(sprite);
-	window.display();
-
-	chip8.drawFlag = false;
-}
-
-int main(int argc, char** argv)
-{
-	sf::Clock timer;
-	timer.restart();
-
-	sf::SoundBuffer buffer;
-	if (!buffer.loadFromFile("buzzer.wav"))
+	int ConstructConsole(int width, int height, int fontw, int fonth)
 	{
-		printf("Could not load buzzer sound");
-		getchar();
-		return -1;
+		if (m_hConsole == INVALID_HANDLE_VALUE)
+			return Error(L"Bad Handle");
+
+		m_nScreenWidth = width;
+		m_nScreenHeight = height;
+
+		m_rectWindow = { 0, 0, 1, 1 };
+		SetConsoleWindowInfo(m_hConsole, TRUE, &m_rectWindow);
+
+		// Set the size of the screen buffer
+		COORD coord = { (short)m_nScreenWidth, (short)m_nScreenHeight };
+		if (!SetConsoleScreenBufferSize(m_hConsole, coord))
+			Error(L"SetConsoleScreenBufferSize");
+
+		// Assign screen buffer to the console
+		if (!SetConsoleActiveScreenBuffer(m_hConsole))
+			return Error(L"SetConsoleActiveScreenBuffer");
+
+		// Set the font size now that the screen buffer has been assigned to the console
+		CONSOLE_FONT_INFOEX cfi;
+		cfi.cbSize = sizeof(cfi);
+		cfi.nFont = 0;
+		cfi.dwFontSize.X = fontw;
+		cfi.dwFontSize.Y = fonth;
+		cfi.FontFamily = FF_DONTCARE;
+		cfi.FontWeight = FW_NORMAL;
+
+		/*	DWORD version = GetVersion();
+		DWORD major = (DWORD)(LOBYTE(LOWORD(version)));
+		DWORD minor = (DWORD)(HIBYTE(LOWORD(version)));*/
+
+		//if ((major > 6) || ((major == 6) && (minor >= 2) && (minor < 4)))		
+		//	wcscpy_s(cfi.FaceName, L"Raster"); // Windows 8 :(
+		//else
+		//	wcscpy_s(cfi.FaceName, L"Lucida Console"); // Everything else :P
+
+		//wcscpy_s(cfi.FaceName, L"Liberation Mono");
+		wcscpy_s(cfi.FaceName, L"Consolas");
+		if (!SetCurrentConsoleFontEx(m_hConsole, false, &cfi))
+			return Error(L"SetCurrentConsoleFontEx");
+
+		// Get screen buffer info and check the maximum allowed window size. Return
+		// error if exceeded, so user knows their dimensions/fontsize are too large
+		CONSOLE_SCREEN_BUFFER_INFO csbi;
+		if (!GetConsoleScreenBufferInfo(m_hConsole, &csbi))
+			return Error(L"GetConsoleScreenBufferInfo");
+		if (m_nScreenHeight > csbi.dwMaximumWindowSize.Y)
+			return Error(L"Screen Height / Font Height Too Big");
+		if (m_nScreenWidth > csbi.dwMaximumWindowSize.X)
+			return Error(L"Screen Width / Font Width Too Big");
+
+		// Set Physical Console Window Size
+		m_rectWindow = { 0, 0, (short)m_nScreenWidth - 1, (short)m_nScreenHeight - 1 };
+		if (!SetConsoleWindowInfo(m_hConsole, TRUE, &m_rectWindow))
+			return Error(L"SetConsoleWindowInfo");
+
+		// Set flags to allow mouse input		
+		if (!SetConsoleMode(m_hConsoleIn, ENABLE_EXTENDED_FLAGS | ENABLE_WINDOW_INPUT | ENABLE_MOUSE_INPUT))
+			return Error(L"SetConsoleMode");
+
+		// Allocate memory for screen buffer
+		m_bufScreen = new CHAR_INFO[m_nScreenWidth*m_nScreenHeight];
+		memset(m_bufScreen, 0, sizeof(CHAR_INFO) * m_nScreenWidth * m_nScreenHeight);
+
+		SetConsoleCtrlHandler((PHANDLER_ROUTINE)CloseHandler, TRUE);
+		return 1;
 	}
 
-	sf::Sound buzzer;
-	buzzer.setBuffer(buffer);
-	buzzer.setVolume(1.5f);
+	virtual void Draw(int x, int y, short c = 0x2588, short col = 0x000F)
+	{
+		if (x >= 0 && x < m_nScreenWidth && y >= 0 && y < m_nScreenHeight)
+		{
+			m_bufScreen[y * m_nScreenWidth + x].Char.UnicodeChar = c;
+			m_bufScreen[y * m_nScreenWidth + x].Attributes = col;
+		}
+	}
 
-	chip8.Initialize();
-	chip8.LoadGame("pong2.c8");
+	void Clip(int &x, int &y)
+	{
+		if (x < 0) x = 0;
+		if (x >= m_nScreenWidth) x = m_nScreenWidth;
+		if (y < 0) y = 0;
+		if (y >= m_nScreenHeight) y = m_nScreenHeight;
+	}
 
-	while (!chip8.interrupt)
+	~olcConsoleGameEngine()
+	{
+		SetConsoleActiveScreenBuffer(m_hOriginalConsole);
+		delete[] m_bufScreen;
+	}
+
+public:
+	void Start()
+	{
+		// Start the thread
+		m_bAtomActive = true;
+		std::thread t = std::thread(&olcConsoleGameEngine::GameThread, this);
+
+		// Wait for thread to be exited
+		t.join();
+	}
+
+	int ScreenWidth()
+	{
+		return m_nScreenWidth;
+	}
+
+	int ScreenHeight()
+	{
+		return m_nScreenHeight;
+	}
+
+private:
+	void GameThread()
+	{
+		// Create user resources as part of this thread
+		if (!OnUserCreate())
+			m_bAtomActive = false;
+
+		auto tp1 = std::chrono::system_clock::now();
+		auto tp2 = std::chrono::system_clock::now();
+
+		while (m_bAtomActive)
+		{
+			// Run as fast as possible
+			while (m_bAtomActive)
+			{
+				// Handle Timing
+				tp2 = std::chrono::system_clock::now();
+				std::chrono::duration<float> elapsedTime = tp2 - tp1;
+				tp1 = tp2;
+				float fElapsedTime = elapsedTime.count();
+
+
+				// Handle Frame Update
+				if (!OnUserUpdate(fElapsedTime))
+					m_bAtomActive = false;
+
+				// Update Title & Present Screen Buffer
+				wchar_t s[256];
+				swprintf_s(s, 256, L"OneLoneCoder.com - Console Game Engine - %s - FPS: %3.2f", m_sAppName.c_str(), 1.0f / fElapsedTime);
+				SetConsoleTitle(s);
+				WriteConsoleOutput(m_hConsole, m_bufScreen, { (short)m_nScreenWidth, (short)m_nScreenHeight }, { 0,0 }, &m_rectWindow);
+			}
+
+			if (m_bEnableSound)
+			{
+				// Close and Clean up audio system
+			}
+
+			// Allow the user to free resources if they have overrided the destroy function
+			if (OnUserDestroy())
+			{
+				// User has permitted destroy, so exit and clean up
+				delete[] m_bufScreen;
+				SetConsoleActiveScreenBuffer(m_hOriginalConsole);
+				m_cvGameFinished.notify_one();
+			}
+			else
+			{
+				// User denied destroy for some reason, so continue running
+				m_bAtomActive = true;
+			}
+		}
+	}
+
+public:
+	// User MUST OVERRIDE THESE!!
+	virtual bool OnUserCreate() = 0;
+	virtual bool OnUserUpdate(float fElapsedTime) = 0;
+
+	// Optional for clean up 
+	virtual bool OnUserDestroy() { return true; }
+
+	protected:
+		int Error(const wchar_t *msg)
+		{
+			wchar_t buf[256];
+			FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM, NULL, GetLastError(), MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), buf, 256, NULL);
+			SetConsoleActiveScreenBuffer(m_hOriginalConsole);
+			wprintf(L"ERROR: %s\n\t%s\n", msg, buf);
+			return 0;
+		}
+
+		static BOOL CloseHandler(DWORD evt)
+		{
+			// Note this gets called in a seperate OS thread, so it must
+			// only exit when the game has finished cleaning up, or else
+			// the process will be killed before OnUserDestroy() has finished
+			if (evt == CTRL_CLOSE_EVENT)
+			{
+				m_bAtomActive = false;
+
+				// Wait for thread to be exited
+				std::unique_lock<std::mutex> ul(m_muxGame);
+				m_cvGameFinished.wait(ul);
+			}
+			return true;
+		}
+
+protected:
+	int m_nScreenWidth;
+	int m_nScreenHeight;
+	CHAR_INFO *m_bufScreen;
+	std::wstring m_sAppName;
+	HANDLE m_hOriginalConsole;
+	CONSOLE_SCREEN_BUFFER_INFO m_OriginalConsoleInfo;
+	HANDLE m_hConsole;
+	HANDLE m_hConsoleIn;
+	SMALL_RECT m_rectWindow;
+	short m_keyOldState[256] = { 0 };
+	short m_keyNewState[256] = { 0 };
+	bool m_mouseOldState[5] = { 0 };
+	bool m_mouseNewState[5] = { 0 };
+	bool m_bConsoleInFocus = true;
+	bool m_bEnableSound = false;
+
+	// These need to be static because of the OnDestroy call the OS may make. The OS
+	// spawns a special thread just for that
+	static std::atomic<bool> m_bAtomActive;
+	static std::condition_variable m_cvGameFinished;
+	static std::mutex m_muxGame;
+};
+
+// Define our static variables
+std::atomic<bool> olcConsoleGameEngine::m_bAtomActive(false);
+std::condition_variable olcConsoleGameEngine::m_cvGameFinished;
+std::mutex olcConsoleGameEngine::m_muxGame;
+
+
+//////////////////////////////////////////////
+/// \brief Initializes and handles Screen
+///
+//////////////////////////////////////////////
+class Screen : public olcConsoleGameEngine
+{
+public:
+	Screen(){}
+
+	virtual bool OnUserCreate()
+	{
+		then = std::chrono::system_clock::now();
+
+		chip8.Initialize();
+		chip8.LoadGame(FILENAME);
+		//MessageBox(NULL, L"", L"", MB_OK);
+
+		return true;
+	}
+
+	virtual bool OnUserUpdate(float elapsedTime)
 	{
 		chip8.EmulateCycle();
 
-		if (timer.getElapsedTime().asMilliseconds() >= 1000 / 60)
+		now = std::chrono::system_clock::now();
+
+		if (std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() - std::chrono::duration_cast<std::chrono::milliseconds>(then.time_since_epoch()).count() >= 1000 / 60)
 		{
-			if (chip8.delay_timer != 0) chip8.delay_timer--;
+			//std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() - std::chrono::duration_cast<std::chrono::milliseconds>(then.time_since_epoch()).count() << std::endl;
+
+			if (chip8.delay_timer != 0)
+			{
+				chip8.delay_timer--;
+			}
 			if (chip8.sound_timer != 0) {
-				buzzer.play();
 				chip8.sound_timer--;
 			}
-			timer.restart();
+
+			then = now;
+
 		}
 
 		if (chip8.drawFlag)
 		{
 			drawGraphics();
 		}
+		Sleep(1);
 
-		while (window.pollEvent(event))
-		{
-			if (event.type == sf::Event::Closed)
-			{
-				chip8.interrupt = true;
-				window.close();
-			}
-			
-		}
-		sf::sleep(sf::milliseconds(1));
+		return true;
 	}
+
+private:
+	std::chrono::system_clock::time_point then, now;
+
+	//////////////////////////////////////////////
+	/// \brief Draws the pixel array to the screen
+	///
+	/// \param window The render target
+	/// \param pixels The pixel array
+	///
+	//////////////////////////////////////////////
+	void drawGraphics()
+	{
+		BYTE* gfx = chip8.getDisplay();
+
+		for (int i = 0; i < WIDTH * HEIGHT; i++)
+		{
+			int y = floor(i / WIDTH);
+			int x = i - (y * WIDTH);
+			COLOUR col = (gfx[i] == 0x00) ? FG_BLACK : FG_WHITE;
+
+			std::wstring s = std::to_wstring(x) + L", " + std::to_wstring(y);
+
+			Draw(x, y, PIXEL_SOLID, col);
+		}
+
+		chip8.drawFlag = false;
+	}
+};
+
+
+
+int main(int argc, char** argv)
+{
+	Screen screen;
+	screen.ConstructConsole(WIDTH, HEIGHT, 16, 16);
+	screen.Start();
+
+	
 
 	return 0;
 }
